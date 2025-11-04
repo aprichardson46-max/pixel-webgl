@@ -6,6 +6,8 @@
     <title>Unity WebGL Player | Pixel Golf</title>
     <link rel="shortcut icon" href="TemplateData/favicon.ico">
     <link rel="stylesheet" href="TemplateData/style.css">
+    <!-- WebGL Precision Fix for Mobile Browsers -->
+    <script src="webgl-precision-fix.js"></script>
   </head>
   <body>
     <div id="unity-container" class="unity-desktop">
@@ -98,7 +100,7 @@
         // performance, uncomment the following line:
         // config.devicePixelRatio = 1;
 
-        unityShowBanner('WebGL builds are not supported on mobile devices.');
+        // Removed mobile warning since we now support mobile with WebGL fix
       } else {
         // Desktop style: Render the game canvas in a window that can be maximized to fullscreen:
 
