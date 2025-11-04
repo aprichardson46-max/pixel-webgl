@@ -2,14 +2,15 @@
 (function() {
     'use strict';
     
-    // Store original function
+    // Store original functions
     const originalGetShaderPrecisionFormat = WebGLRenderingContext.prototype.getShaderPrecisionFormat;
+    const originalCreateShader = WebGLRenderingContext.prototype.createShader;
+    const originalGetError = WebGLRenderingContext.prototype.getError;
     
-    // Override with null-safe version
+    // Override getShaderPrecisionFormat with null-safe version
     WebGLRenderingContext.prototype.getShaderPrecisionFormat = function(shaderType, precisionType) {
         const result = originalGetShaderPrecisionFormat.call(this, shaderType, precisionType);
         
-        // If result is null, return a fallback object
         if (!result) {
             console.warn('getShaderPrecisionFormat returned null, using fallback values');
             return {
@@ -22,9 +23,31 @@
         return result;
     };
     
+    // Override createShader to handle null returns
+    WebGLRenderingContext.prototype.createShader = function(type) {
+        const shader = originalCreateShader.call(this, type);
+        
+        if (!shader) {
+            console.error('createShader failed for type:', type === this.VERTEX_SHADER ? 'VERTEX_SHADER' : 'FRAGMENT_SHADER');
+            const error = this.getError();
+            console.error('WebGL error code:', error);
+            
+            // Try to create a basic shader object as fallback
+            try {
+                return originalCreateShader.call(this, type);
+            } catch (e) {
+                console.error('Shader creation completely failed:', e);
+                return null;
+            }
+        }
+        
+        return shader;
+    };
+    
     // Also handle WebGL2 context if available
     if (typeof WebGL2RenderingContext !== 'undefined') {
         const originalGetShaderPrecisionFormat2 = WebGL2RenderingContext.prototype.getShaderPrecisionFormat;
+        const originalCreateShader2 = WebGL2RenderingContext.prototype.createShader;
         
         WebGL2RenderingContext.prototype.getShaderPrecisionFormat = function(shaderType, precisionType) {
             const result = originalGetShaderPrecisionFormat2.call(this, shaderType, precisionType);
@@ -40,6 +63,25 @@
             
             return result;
         };
+        
+        WebGL2RenderingContext.prototype.createShader = function(type) {
+            const shader = originalCreateShader2.call(this, type);
+            
+            if (!shader) {
+                console.error('WebGL2 createShader failed for type:', type === this.VERTEX_SHADER ? 'VERTEX_SHADER' : 'FRAGMENT_SHADER');
+                const error = this.getError();
+                console.error('WebGL2 error code:', error);
+                
+                try {
+                    return originalCreateShader2.call(this, type);
+                } catch (e) {
+                    console.error('WebGL2 shader creation completely failed:', e);
+                    return null;
+                }
+            }
+            
+            return shader;
+        };
     }
 })();
 
@@ -52,6 +94,19 @@ function checkWebGLSupport() {
         if (!gl) {
             throw new Error('WebGL not supported');
         }
+        
+        // Test shader creation
+        const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+        const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+        
+        console.log('WebGL shader creation test:', {
+            vertexShader: !!vertexShader,
+            fragmentShader: !!fragmentShader
+        });
+        
+        // Clean up test shaders
+        if (vertexShader) gl.deleteShader(vertexShader);
+        if (fragmentShader) gl.deleteShader(fragmentShader);
         
         // Test shader precision format support
         const vertexShaderPrecision = gl.getShaderPrecisionFormat(gl.VERTEX_SHADER, gl.HIGH_FLOAT);
