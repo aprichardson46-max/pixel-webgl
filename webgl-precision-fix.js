@@ -11,6 +11,70 @@
     let shaderCreationAttempts = 0;
     let failedShaderCreations = 0;
     
+    // Unity GL object patching - wait for it to be available
+    let unityGLPatchAttempts = 0;
+    const maxUnityGLPatchAttempts = 100;
+    
+    function patchUnityGL() {
+        unityGLPatchAttempts++;
+        
+        // Check if Unity's GL object is available
+        if (typeof window.GL !== 'undefined' && window.GL && window.GL.shaders) {
+            console.log('Found Unity GL object, patching shader storage...');
+            
+            const originalShaders = window.GL.shaders;
+            
+            // Create a proxy to intercept shader assignments
+            window.GL.shaders = new Proxy(originalShaders, {
+                set: function(target, property, value) {
+                    if (value === null) {
+                        console.warn(`Preventing null shader assignment to GL.shaders[${property}]`);
+                        // Create a mock shader instead
+                        value = {
+                            __isMockShader: true,
+                            shaderType: 'unknown',
+                            toString: function() { return '[Mock Unity Shader]'; }
+                        };
+                    }
+                    target[property] = value;
+                    return true;
+                },
+                get: function(target, property) {
+                    const value = target[property];
+                    if (value === null) {
+                        console.warn(`Intercepted null shader access from GL.shaders[${property}]`);
+                        return {
+                            __isMockShader: true,
+                            shaderType: 'unknown',
+                            toString: function() { return '[Mock Unity Shader]'; }
+                        };
+                    }
+                    return value;
+                }
+            });
+            
+            console.log('Unity GL.shaders patched successfully');
+            return true;
+        } else if (unityGLPatchAttempts < maxUnityGLPatchAttempts) {
+            // Try again in 50ms
+            setTimeout(patchUnityGL, 50);
+            return false;
+        } else {
+            console.warn('Could not find Unity GL object to patch');
+            return false;
+        }
+    }
+    
+    // Start trying to patch Unity GL immediately
+    patchUnityGL();
+    
+    // Also patch when DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', patchUnityGL);
+    } else {
+        setTimeout(patchUnityGL, 100);
+    }
+    
     // Override getShaderPrecisionFormat with null-safe version
     WebGLRenderingContext.prototype.getShaderPrecisionFormat = function(shaderType, precisionType) {
         const result = originalGetShaderPrecisionFormat.call(this, shaderType, precisionType);
@@ -47,37 +111,21 @@
                 // Clear error queue
             }
             
-            // Try multiple recovery strategies
-            for (let attempt = 0; attempt < 3; attempt++) {
-                console.log(`Recovery attempt ${attempt + 1}`);
-                
-                // Wait a bit and try again
-                setTimeout(() => {}, 1);
-                
-                shader = originalCreateShader.call(this, type);
-                if (shader) {
-                    console.log('Shader creation succeeded on retry');
-                    break;
-                }
-            }
+            // Create a mock shader object immediately to prevent Unity crashes
+            console.error('Creating mock shader object to prevent Unity crash');
             
-            // If still null, create a mock shader object to prevent Unity crashes
-            if (!shader) {
-                console.error('All shader creation attempts failed, creating mock object');
-                
-                // Create a fake shader-like object that won't crash Unity
-                shader = {
-                    __isMockShader: true,
-                    shaderType: type === this.VERTEX_SHADER ? 'vs' : 'fs',
-                    toString: function() { return '[Mock WebGL Shader]'; }
-                };
-                
-                // Try to make it look more like a real WebGLShader
-                try {
-                    Object.setPrototypeOf(shader, WebGLShader.prototype);
-                } catch (e) {
-                    // If that fails, just continue with the mock object
-                }
+            // Create a fake shader-like object that won't crash Unity
+            shader = {
+                __isMockShader: true,
+                shaderType: type === this.VERTEX_SHADER ? 'vs' : 'fs',
+                toString: function() { return '[Mock WebGL Shader]'; }
+            };
+            
+            // Try to make it look more like a real WebGLShader
+            try {
+                Object.setPrototypeOf(shader, WebGLShader.prototype);
+            } catch (e) {
+                // If that fails, just continue with the mock object
             }
         }
         

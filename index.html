@@ -6,7 +6,11 @@
     <title>Unity WebGL Player | Pixel Golf</title>
     <link rel="shortcut icon" href="TemplateData/favicon.ico">
     <link rel="stylesheet" href="TemplateData/style.css">
-    <!-- WebGL Precision Fix for Mobile Browsers -->
+    <!-- WebGL Precision Fix for Mobile Browsers - Load FIRST -->
+    <script>
+      // Ensure our fixes are loaded before any other scripts
+      console.log('Loading WebGL compatibility fixes...');
+    </script>
     <script src="webgl-precision-fix.js"></script>
   </head>
   <body>
@@ -113,16 +117,20 @@
       var script = document.createElement("script");
       script.src = loaderUrl;
       script.onload = () => {
-        createUnityInstance(canvas, config, (progress) => {
-          progressBarFull.style.width = 100 * progress + "%";
-        }).then((unityInstance) => {
-          loadingBar.style.display = "none";
-          fullscreenButton.onclick = () => {
-            unityInstance.SetFullscreen(1);
-          };
-        }).catch((message) => {
-          alert(message);
-        });
+        // Add a small delay to ensure our GL patches are applied
+        setTimeout(() => {
+          createUnityInstance(canvas, config, (progress) => {
+            progressBarFull.style.width = 100 * progress + "%";
+          }).then((unityInstance) => {
+            loadingBar.style.display = "none";
+            fullscreenButton.onclick = () => {
+              unityInstance.SetFullscreen(1);
+            };
+          }).catch((message) => {
+            console.error('Unity instance creation failed:', message);
+            unityShowBanner('Failed to load game: ' + message, 'error');
+          });
+        }, 100);
       };
       document.body.appendChild(script);
     </script>
