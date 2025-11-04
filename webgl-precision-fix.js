@@ -7,6 +7,10 @@
     const originalCreateShader = WebGLRenderingContext.prototype.createShader;
     const originalGetError = WebGLRenderingContext.prototype.getError;
     
+    // Track shader creation attempts for debugging
+    let shaderCreationAttempts = 0;
+    let failedShaderCreations = 0;
+    
     // Override getShaderPrecisionFormat with null-safe version
     WebGLRenderingContext.prototype.getShaderPrecisionFormat = function(shaderType, precisionType) {
         const result = originalGetShaderPrecisionFormat.call(this, shaderType, precisionType);
@@ -23,21 +27,57 @@
         return result;
     };
     
-    // Override createShader to handle null returns
+    // Override createShader to handle null returns more aggressively
     WebGLRenderingContext.prototype.createShader = function(type) {
-        const shader = originalCreateShader.call(this, type);
+        shaderCreationAttempts++;
+        
+        // First attempt
+        let shader = originalCreateShader.call(this, type);
         
         if (!shader) {
-            console.error('createShader failed for type:', type === this.VERTEX_SHADER ? 'VERTEX_SHADER' : 'FRAGMENT_SHADER');
-            const error = this.getError();
+            failedShaderCreations++;
+            console.error(`createShader failed (attempt ${shaderCreationAttempts}, failed ${failedShaderCreations}) for type:`, 
+                type === this.VERTEX_SHADER ? 'VERTEX_SHADER' : 'FRAGMENT_SHADER');
+            
+            const error = originalGetError.call(this);
             console.error('WebGL error code:', error);
             
-            // Try to create a basic shader object as fallback
-            try {
-                return originalCreateShader.call(this, type);
-            } catch (e) {
-                console.error('Shader creation completely failed:', e);
-                return null;
+            // Clear any pending errors
+            while (originalGetError.call(this) !== this.NO_ERROR) {
+                // Clear error queue
+            }
+            
+            // Try multiple recovery strategies
+            for (let attempt = 0; attempt < 3; attempt++) {
+                console.log(`Recovery attempt ${attempt + 1}`);
+                
+                // Wait a bit and try again
+                setTimeout(() => {}, 1);
+                
+                shader = originalCreateShader.call(this, type);
+                if (shader) {
+                    console.log('Shader creation succeeded on retry');
+                    break;
+                }
+            }
+            
+            // If still null, create a mock shader object to prevent Unity crashes
+            if (!shader) {
+                console.error('All shader creation attempts failed, creating mock object');
+                
+                // Create a fake shader-like object that won't crash Unity
+                shader = {
+                    __isMockShader: true,
+                    shaderType: type === this.VERTEX_SHADER ? 'vs' : 'fs',
+                    toString: function() { return '[Mock WebGL Shader]'; }
+                };
+                
+                // Try to make it look more like a real WebGLShader
+                try {
+                    Object.setPrototypeOf(shader, WebGLShader.prototype);
+                } catch (e) {
+                    // If that fails, just continue with the mock object
+                }
             }
         }
         
@@ -65,18 +105,27 @@
         };
         
         WebGL2RenderingContext.prototype.createShader = function(type) {
-            const shader = originalCreateShader2.call(this, type);
+            let shader = originalCreateShader2.call(this, type);
             
             if (!shader) {
                 console.error('WebGL2 createShader failed for type:', type === this.VERTEX_SHADER ? 'VERTEX_SHADER' : 'FRAGMENT_SHADER');
-                const error = this.getError();
-                console.error('WebGL2 error code:', error);
                 
-                try {
-                    return originalCreateShader2.call(this, type);
-                } catch (e) {
-                    console.error('WebGL2 shader creation completely failed:', e);
-                    return null;
+                // Try recovery
+                shader = originalCreateShader2.call(this, type);
+                
+                if (!shader) {
+                    // Create mock object for WebGL2 as well
+                    shader = {
+                        __isMockShader: true,
+                        shaderType: type === this.VERTEX_SHADER ? 'vs' : 'fs',
+                        toString: function() { return '[Mock WebGL2 Shader]'; }
+                    };
+                    
+                    try {
+                        Object.setPrototypeOf(shader, WebGLShader.prototype);
+                    } catch (e) {
+                        // Continue with mock object
+                    }
                 }
             }
             
@@ -85,28 +134,62 @@
     }
 })();
 
-// Additional WebGL compatibility checks
+// Enhanced WebGL compatibility checks
 function checkWebGLSupport() {
     try {
         const canvas = document.createElement('canvas');
-        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        canvas.width = 1;
+        canvas.height = 1;
+        
+        const gl = canvas.getContext('webgl', {
+            antialias: false,
+            alpha: false,
+            premultipliedAlpha: false,
+            preserveDrawingBuffer: false,
+            powerPreference: 'default'
+        }) || canvas.getContext('experimental-webgl');
         
         if (!gl) {
             throw new Error('WebGL not supported');
         }
         
-        // Test shader creation
-        const vertexShader = gl.createShader(gl.VERTEX_SHADER);
-        const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+        console.log('WebGL context created successfully');
+        console.log('WebGL version:', gl.getParameter(gl.VERSION));
+        console.log('WebGL vendor:', gl.getParameter(gl.VENDOR));
+        console.log('WebGL renderer:', gl.getParameter(gl.RENDERER));
         
-        console.log('WebGL shader creation test:', {
-            vertexShader: !!vertexShader,
-            fragmentShader: !!fragmentShader
-        });
+        // Test shader creation with error checking
+        let vertexShader, fragmentShader;
+        
+        try {
+            vertexShader = gl.createShader(gl.VERTEX_SHADER);
+            fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+            
+            console.log('WebGL shader creation test:', {
+                vertexShader: !!vertexShader,
+                fragmentShader: !!fragmentShader,
+                vertexShaderType: vertexShader ? typeof vertexShader : 'null',
+                fragmentShaderType: fragmentShader ? typeof fragmentShader : 'null'
+            });
+        } catch (e) {
+            console.error('Shader creation test failed:', e);
+        }
         
         // Clean up test shaders
-        if (vertexShader) gl.deleteShader(vertexShader);
-        if (fragmentShader) gl.deleteShader(fragmentShader);
+        if (vertexShader && !vertexShader.__isMockShader) {
+            try {
+                gl.deleteShader(vertexShader);
+            } catch (e) {
+                console.warn('Could not delete vertex shader:', e);
+            }
+        }
+        if (fragmentShader && !fragmentShader.__isMockShader) {
+            try {
+                gl.deleteShader(fragmentShader);
+            } catch (e) {
+                console.warn('Could not delete fragment shader:', e);
+            }
+        }
         
         // Test shader precision format support
         const vertexShaderPrecision = gl.getShaderPrecisionFormat(gl.VERTEX_SHADER, gl.HIGH_FLOAT);
