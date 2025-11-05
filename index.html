@@ -6,12 +6,6 @@
     <title>Unity WebGL Player | Pixel Golf</title>
     <link rel="shortcut icon" href="TemplateData/favicon.ico">
     <link rel="stylesheet" href="TemplateData/style.css">
-    <!-- WebGL Precision Fix for Mobile Browsers - Load FIRST -->
-    <script>
-      // Ensure our fixes are loaded before any other scripts
-      console.log('Loading WebGL compatibility fixes...');
-    </script>
-    <script src="webgl-precision-fix.js"></script>
   </head>
   <body>
     <div id="unity-container" class="unity-desktop">
@@ -62,11 +56,11 @@
       }
 
       var buildUrl = "Build";
-      var loaderUrl = buildUrl + "/Buildv_60-2021 Edit.loader.js";
+      var loaderUrl = buildUrl + "/Buildv_61-2021 Edit.loader.js";
       var config = {
-        dataUrl: buildUrl + "/Buildv_60-2021 Edit.data",
-        frameworkUrl: buildUrl + "/Buildv_60-2021 Edit.framework.js",
-        codeUrl: buildUrl + "/Buildv_60-2021 Edit.wasm",
+        dataUrl: buildUrl + "/Buildv_61-2021 Edit.data.gz",
+        frameworkUrl: buildUrl + "/Buildv_61-2021 Edit.framework.js.gz",
+        codeUrl: buildUrl + "/Buildv_61-2021 Edit.wasm.gz",
         streamingAssetsUrl: "StreamingAssets",
         companyName: "Firestorm Inc",
         productName: "Pixel Golf",
@@ -104,7 +98,7 @@
         // performance, uncomment the following line:
         // config.devicePixelRatio = 1;
 
-        // Removed mobile warning since we now support mobile with WebGL fix
+        unityShowBanner('WebGL builds are not supported on mobile devices.');
       } else {
         // Desktop style: Render the game canvas in a window that can be maximized to fullscreen:
 
@@ -117,20 +111,16 @@
       var script = document.createElement("script");
       script.src = loaderUrl;
       script.onload = () => {
-        // Add a small delay to ensure our GL patches are applied
-        setTimeout(() => {
-          createUnityInstance(canvas, config, (progress) => {
-            progressBarFull.style.width = 100 * progress + "%";
-          }).then((unityInstance) => {
-            loadingBar.style.display = "none";
-            fullscreenButton.onclick = () => {
-              unityInstance.SetFullscreen(1);
-            };
-          }).catch((message) => {
-            console.error('Unity instance creation failed:', message);
-            unityShowBanner('Failed to load game: ' + message, 'error');
-          });
-        }, 100);
+        createUnityInstance(canvas, config, (progress) => {
+          progressBarFull.style.width = 100 * progress + "%";
+        }).then((unityInstance) => {
+          loadingBar.style.display = "none";
+          fullscreenButton.onclick = () => {
+            unityInstance.SetFullscreen(1);
+          };
+        }).catch((message) => {
+          alert(message);
+        });
       };
       document.body.appendChild(script);
     </script>
