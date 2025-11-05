@@ -4,27 +4,41 @@
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <title>Unity Web Player | Pixel Golf</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>html,body{height:100%;margin:0;padding:0;background:#231F20}#unity-canvas{display:block}</style>
   </head>
-  <body style="text-align: center; padding: 0; border: 0; margin: 0;">
-    <canvas id="unity-canvas" width=960 height=600 tabindex="-1" style="width: 960px; height: 600px; background: #231F20"></canvas>
+  <body>
+    <canvas id="unity-canvas" width="960" height="600" tabindex="-1" style="width:100%;height:100%;position:fixed;"></canvas>
+
+    <!-- Override Module.instantiateWasm to fetch & instantiate the wasm as an ArrayBuffer. -->
+    <script>
+      var Module = Module || {};
+      Module.locateFile = function(path) {
+        return 'Build/' + path;
+      };
+
+      Module.instantiateWasm = function(imports, receiveInstance) {
+        return fetch('Build/Buildv_52.wasm', { credentials: 'same-origin' })
+          .then(function(response) {
+            if (!response.ok) throw new Error('Failed to load WASM: ' + response.status + ' ' + response.statusText);
+            return response.arrayBuffer();
+          })
+          .then(function(bytes) {
+            return WebAssembly.instantiate(bytes, imports);
+          })
+          .then(function(results) {
+            receiveInstance(results.instance);
+            return results.instance;
+          })
+          .catch(function(err) {
+            console.error('WASM instantiate failed:', err);
+            throw err;
+          });
+      };
+    </script>
+
     <script src="Build/Buildv_52.loader.js"></script>
     <script>
-      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-        // Mobile device style: fill the whole browser client area with the game canvas:
-        var meta = document.createElement('meta');
-        meta.name = 'viewport';
-        meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
-        document.getElementsByTagName('head')[0].appendChild(meta);
-
-        var canvas = document.querySelector("#unity-canvas");
-        canvas.style.width = "100%";
-        canvas.style.height = "100%";
-        canvas.style.position = "fixed";
-
-        document.body.style.textAlign = "left";
-
-      }
-
       createUnityInstance(document.querySelector("#unity-canvas"), {
         arguments: [],
         dataUrl: "Build/Buildv_52.data",
@@ -33,12 +47,12 @@
         streamingAssetsUrl: "StreamingAssets",
         companyName: "Firestorm Inc",
         productName: "Pixel Golf",
-        productVersion: "1.0",
-        // matchWebGLToCanvasSize: false, // Uncomment this to separately control WebGL canvas render size and DOM element size.
-        // devicePixelRatio: 1, // Uncomment this to override low DPI rendering on high DPI displays.
-      }).then((unityInstance) => {
-      }).catch((message) => {
+        productVersion: "1.0"
+      }).then(function(unityInstance) {
+        // success
+      }).catch(function(message) {
         alert(message);
+        console.error('createUnityInstance error:', message);
       });
     </script>
   </body>
