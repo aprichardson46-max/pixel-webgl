@@ -17,6 +17,86 @@
     // Store mock shaders to track them
     const mockShaders = new WeakSet();
     
+    // Patch Unity's internal _glGetShaderPrecisionFormat function
+    function patchUnityInternals() {
+        // Try to patch the window object for Unity's internal functions
+        const originalWindowGetShaderPrecisionFormat = window._glGetShaderPrecisionFormat;
+        
+        if (typeof window._glGetShaderPrecisionFormat === 'function') {
+            console.log('Patching Unity internal _glGetShaderPrecisionFormat');
+            
+            window._glGetShaderPrecisionFormat = function(shaderType, precisionType) {
+                console.log('Unity internal _glGetShaderPrecisionFormat called');
+                const result = originalWindowGetShaderPrecisionFormat.call(this, shaderType, precisionType);
+                
+                if (!result) {
+                    console.warn('Unity internal _glGetShaderPrecisionFormat returned null, using fallback');
+                    return {
+                        rangeMin: 1,
+                        rangeMax: 1,
+                        precision: 23
+                    };
+                }
+                
+                return result;
+            };
+        }
+        
+        // Also try to patch Module if it exists
+        if (typeof window.Module !== 'undefined' && window.Module && window.Module._glGetShaderPrecisionFormat) {
+            console.log('Patching Module._glGetShaderPrecisionFormat');
+            const originalModule = window.Module._glGetShaderPrecisionFormat;
+            
+            window.Module._glGetShaderPrecisionFormat = function(shaderType, precisionType) {
+                console.log('Module._glGetShaderPrecisionFormat called');
+                const result = originalModule.call(this, shaderType, precisionType);
+                
+                if (!result) {
+                    console.warn('Module._glGetShaderPrecisionFormat returned null, using fallback');
+                    return {
+                        rangeMin: 1,
+                        rangeMax: 1,
+                        precision: 23
+                    };
+                }
+                
+                return result;
+            };
+        }
+    }
+    
+    // Try to patch immediately and also set up watchers
+    patchUnityInternals();
+    
+    // Monitor for when Unity's functions become available
+    const originalDefineProperty = Object.defineProperty;
+    Object.defineProperty = function(obj, prop, descriptor) {
+        if (prop === '_glGetShaderPrecisionFormat' && (obj === window || obj === window.Module)) {
+            console.log('Intercepted _glGetShaderPrecisionFormat definition');
+            
+            if (descriptor.value && typeof descriptor.value === 'function') {
+                const originalFunc = descriptor.value;
+                descriptor.value = function(shaderType, precisionType) {
+                    console.log('Intercepted _glGetShaderPrecisionFormat call');
+                    const result = originalFunc.call(this, shaderType, precisionType);
+                    
+                    if (!result) {
+                        console.warn('Intercepted _glGetShaderPrecisionFormat returned null, using fallback');
+                        return {
+                            rangeMin: 1,
+                            rangeMax: 1,
+                            precision: 23
+                        };
+                    }
+                    
+                    return result;
+                };
+            }
+        }
+        
+        return originalDefineProperty.call(this, obj, prop, descriptor);
+    };
+    
     // Create a more convincing mock shader
     function createMockShader(gl, type) {
         mockShaderCounter++;
@@ -100,54 +180,72 @@
     
     // Unity GL object patching - wait for it to be available
     let unityGLPatchAttempts = 0;
-    const maxUnityGLPatchAttempts = 100;
+    const maxUnityGLPatchAttempts = 200; // Increased attempts
     
     function patchUnityGL() {
         unityGLPatchAttempts++;
         
+        // Also try to patch Unity's internal functions each time
+        patchUnityInternals();
+        
         // Check if Unity's GL object is available
-        if (typeof window.GL !== 'undefined' && window.GL && window.GL.shaders) {
-            console.log('Found Unity GL object, patching shader storage...');
+        if (typeof window.GL !== 'undefined' && window.GL) {
+            console.log('Found Unity GL object, patching...');
             
-            const originalShaders = window.GL.shaders;
-            
-            // Create a proxy to intercept shader assignments
-            window.GL.shaders = new Proxy(originalShaders, {
-                set: function(target, property, value) {
-                    if (value === null) {
-                        console.warn(`Preventing null shader assignment to GL.shaders[${property}]`);
-                        // Create a mock shader instead
-                        value = {
-                            __isMockShader: true,
-                            shaderType: 'unknown',
-                            toString: function() { return '[Mock Unity Shader]'; }
-                        };
+            // Patch the shaders array if it exists
+            if (window.GL.shaders) {
+                const originalShaders = window.GL.shaders;
+                
+                // Create a proxy to intercept shader assignments
+                window.GL.shaders = new Proxy(originalShaders, {
+                    set: function(target, property, value) {
+                        if (value === null) {
+                            console.warn(`Preventing null shader assignment to GL.shaders[${property}]`);
+                            // Create a mock shader instead
+                            value = createMockShader(window.GL.currentContext || {}, 0);
+                        }
+                        target[property] = value;
+                        return true;
+                    },
+                    get: function(target, property) {
+                        const value = target[property];
+                        if (value === null) {
+                            console.warn(`Intercepted null shader access from GL.shaders[${property}]`);
+                            return createMockShader(window.GL.currentContext || {}, 0);
+                        }
+                        return value;
                     }
-                    target[property] = value;
-                    return true;
-                },
-                get: function(target, property) {
-                    const value = target[property];
-                    if (value === null) {
-                        console.warn(`Intercepted null shader access from GL.shaders[${property}]`);
+                });
+            }
+            
+            // Try to patch any precision format functions in the GL object
+            if (window.GL.getShaderPrecisionFormat) {
+                const originalGLPrecision = window.GL.getShaderPrecisionFormat;
+                window.GL.getShaderPrecisionFormat = function(shaderType, precisionType) {
+                    console.log('Unity GL.getShaderPrecisionFormat called');
+                    const result = originalGLPrecision.call(this, shaderType, precisionType);
+                    
+                    if (!result) {
+                        console.warn('Unity GL.getShaderPrecisionFormat returned null, using fallback');
                         return {
-                            __isMockShader: true,
-                            shaderType: 'unknown',
-                            toString: function() { return '[Mock Unity Shader]'; }
+                            rangeMin: 1,
+                            rangeMax: 1,
+                            precision: 23
                         };
                     }
-                    return value;
-                }
-            });
+                    
+                    return result;
+                };
+            }
             
-            console.log('Unity GL.shaders patched successfully');
+            console.log('Unity GL object patched successfully');
             return true;
         } else if (unityGLPatchAttempts < maxUnityGLPatchAttempts) {
-            // Try again in 50ms
-            setTimeout(patchUnityGL, 50);
+            // Try again in 25ms (more frequent)
+            setTimeout(patchUnityGL, 25);
             return false;
         } else {
-            console.warn('Could not find Unity GL object to patch');
+            console.warn('Could not find Unity GL object to patch after', maxUnityGLPatchAttempts, 'attempts');
             return false;
         }
     }
@@ -155,16 +253,29 @@
     // Start trying to patch Unity GL immediately
     patchUnityGL();
     
-    // Also patch when DOM is ready
+    // Also patch when DOM is ready and at various other times
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', patchUnityGL);
     } else {
         setTimeout(patchUnityGL, 100);
     }
     
+    // Set up additional watchers
+    setTimeout(patchUnityGL, 500);
+    setTimeout(patchUnityGL, 1000);
+    setTimeout(patchUnityGL, 2000);
+    
     // Override getShaderPrecisionFormat with null-safe version
     WebGLRenderingContext.prototype.getShaderPrecisionFormat = function(shaderType, precisionType) {
-        const result = originalGetShaderPrecisionFormat.call(this, shaderType, precisionType);
+        console.log('WebGL getShaderPrecisionFormat called with:', shaderType, precisionType);
+        
+        let result;
+        try {
+            result = originalGetShaderPrecisionFormat.call(this, shaderType, precisionType);
+        } catch (e) {
+            console.error('getShaderPrecisionFormat threw error:', e);
+            result = null;
+        }
         
         if (!result) {
             console.warn('getShaderPrecisionFormat returned null, using fallback values');
@@ -333,4 +444,16 @@ function checkWebGLSupport() {
             }
         }
         if (fragmentShader && !fragmentShader.__isMockShader) {
-            try
+            try {
+                gl.deleteShader(fragmentShader);
+            } catch (e) {
+                console.warn('Could not delete fragment shader:', e);
+            }
+        }
+    } catch (e) {
+        console.error('WebGL support check failed:', e);
+    }
+}
+
+// Run the WebGL support check
+checkWebGLSupport();
