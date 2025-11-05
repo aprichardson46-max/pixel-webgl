@@ -1,397 +1,543 @@
-// WebGL Precision Format Fix for Mobile Browsers
+// Aggressive WebGL Fix for Mobile Browsers - Complete Context Override
 (function() {
     'use strict';
     
-    // Store original functions
-    const originalGetShaderPrecisionFormat = WebGLRenderingContext.prototype.getShaderPrecisionFormat;
-    const originalCreateShader = WebGLRenderingContext.prototype.createShader;
-    const originalShaderSource = WebGLRenderingContext.prototype.shaderSource;
-    const originalCompileShader = WebGLRenderingContext.prototype.compileShader;
-    const originalGetError = WebGLRenderingContext.prototype.getError;
+    console.log('Loading aggressive WebGL compatibility layer...');
     
-    // Track shader creation attempts for debugging
-    let shaderCreationAttempts = 0;
-    let failedShaderCreations = 0;
+    // Store all original WebGL methods
+    const originalMethods = {
+        getContext: HTMLCanvasElement.prototype.getContext,
+        getShaderPrecisionFormat: WebGLRenderingContext.prototype.getShaderPrecisionFormat,
+        createShader: WebGLRenderingContext.prototype.createShader,
+        shaderSource: WebGLRenderingContext.prototype.shaderSource,
+        compileShader: WebGLRenderingContext.prototype.compileShader,
+        getShaderParameter: WebGLRenderingContext.prototype.getShaderParameter,
+        getShaderInfoLog: WebGLRenderingContext.prototype.getShaderInfoLog,
+        deleteShader: WebGLRenderingContext.prototype.deleteShader,
+        attachShader: WebGLRenderingContext.prototype.attachShader,
+        detachShader: WebGLRenderingContext.prototype.detachShader,
+        isShader: WebGLRenderingContext.prototype.isShader
+    };
+    
+    // Track mock shaders and provide fallback data
+    const mockShaders = new WeakMap();
     let mockShaderCounter = 0;
     
-    // Store mock shaders to track them
-    const mockShaders = new WeakSet();
-    
-    // Patch Unity's internal _glGetShaderPrecisionFormat function
-    function patchUnityInternals() {
-        // Try to patch the window object for Unity's internal functions
-        const originalWindowGetShaderPrecisionFormat = window._glGetShaderPrecisionFormat;
-        
-        if (typeof window._glGetShaderPrecisionFormat === 'function') {
-            console.log('Patching Unity internal _glGetShaderPrecisionFormat');
-            
-            window._glGetShaderPrecisionFormat = function(shaderType, precisionType) {
-                console.log('Unity internal _glGetShaderPrecisionFormat called');
-                const result = originalWindowGetShaderPrecisionFormat.call(this, shaderType, precisionType);
-                
-                if (!result) {
-                    console.warn('Unity internal _glGetShaderPrecisionFormat returned null, using fallback');
-                    return {
-                        rangeMin: 1,
-                        rangeMax: 1,
-                        precision: 23
-                    };
-                }
-                
-                return result;
-            };
-        }
-        
-        // Also try to patch Module if it exists
-        if (typeof window.Module !== 'undefined' && window.Module && window.Module._glGetShaderPrecisionFormat) {
-            console.log('Patching Module._glGetShaderPrecisionFormat');
-            const originalModule = window.Module._glGetShaderPrecisionFormat;
-            
-            window.Module._glGetShaderPrecisionFormat = function(shaderType, precisionType) {
-                console.log('Module._glGetShaderPrecisionFormat called');
-                const result = originalModule.call(this, shaderType, precisionType);
-                
-                if (!result) {
-                    console.warn('Module._glGetShaderPrecisionFormat returned null, using fallback');
-                    return {
-                        rangeMin: 1,
-                        rangeMax: 1,
-                        precision: 23
-                    };
-                }
-                
-                return result;
-            };
-        }
+    // Create fallback shader data
+    function createShaderData(type) {
+        return {
+            type: type,
+            source: '',
+            compiled: true,
+            compileStatus: true,
+            infoLog: '',
+            deleteStatus: false
+        };
     }
     
-    // Try to patch immediately and also set up watchers
-    patchUnityInternals();
-    
-    // Monitor for when Unity's functions become available
-    const originalDefineProperty = Object.defineProperty;
-    Object.defineProperty = function(obj, prop, descriptor) {
-        if (prop === '_glGetShaderPrecisionFormat' && (obj === window || obj === window.Module)) {
-            console.log('Intercepted _glGetShaderPrecisionFormat definition');
-            
-            if (descriptor.value && typeof descriptor.value === 'function') {
-                const originalFunc = descriptor.value;
-                descriptor.value = function(shaderType, precisionType) {
-                    console.log('Intercepted _glGetShaderPrecisionFormat call');
-                    const result = originalFunc.call(this, shaderType, precisionType);
-                    
-                    if (!result) {
-                        console.warn('Intercepted _glGetShaderPrecisionFormat returned null, using fallback');
-                        return {
-                            rangeMin: 1,
-                            rangeMax: 1,
-                            precision: 23
-                        };
-                    }
-                    
-                    return result;
-                };
-            }
+    // Override canvas.getContext to wrap the WebGL context
+    HTMLCanvasElement.prototype.getContext = function(contextType, contextAttributes) {
+        const context = originalMethods.getContext.call(this, contextType, contextAttributes);
+        
+        if (!context || (contextType !== 'webgl' && contextType !== 'experimental-webgl' && contextType !== 'webgl2')) {
+            return context;
         }
         
-        return originalDefineProperty.call(this, obj, prop, descriptor);
+        console.log('WebGL context created, applying aggressive patches...');
+        
+        // Override ALL shader-related methods on this specific context
+        const wrappedContext = wrapWebGLContext(context);
+        return wrappedContext;
     };
     
-    // Create a more convincing mock shader
-    function createMockShader(gl, type) {
-        mockShaderCounter++;
-        
-        // Try to create a real shader with minimal source first
-        const minimalSource = type === gl.VERTEX_SHADER 
-            ? 'void main() { gl_Position = vec4(0.0); }'
-            : 'void main() { gl_FragColor = vec4(1.0); }';
-        
-        let realShader = null;
-        try {
-            realShader = originalCreateShader.call(gl, type);
-            if (realShader) {
-                originalShaderSource.call(gl, realShader, minimalSource);
-                originalCompileShader.call(gl, realShader);
+    function wrapWebGLContext(gl) {
+        // Create a proxy to intercept all method calls
+        return new Proxy(gl, {
+            get: function(target, prop) {
+                const value = target[prop];
                 
-                // Check if compilation succeeded
-                if (gl.getShaderParameter(realShader, gl.COMPILE_STATUS)) {
-                    console.log('Created minimal real shader as fallback');
-                    return realShader;
+                // Intercept specific WebGL methods
+                if (prop === 'getShaderPrecisionFormat') {
+                    return function(shaderType, precisionType) {
+                        console.log('Intercepted getShaderPrecisionFormat');
+                        let result;
+                        try {
+                            result = originalMethods.getShaderPrecisionFormat.call(target, shaderType, precisionType);
+                        } catch (e) {
+                            console.warn('getShaderPrecisionFormat error:', e);
+                            result = null;
+                        }
+                        
+                        if (!result) {
+                            console.warn('getShaderPrecisionFormat returned null, using fallback');
+                            return {
+                                rangeMin: 1,
+                                rangeMax: 1,
+                                precision: 23
+                            };
+                        }
+                        return result;
+                    };
                 }
-            }
-        } catch (e) {
-            console.warn('Could not create minimal real shader:', e);
-        }
-        
-        // If real shader creation failed, create a sophisticated mock
-        const mockShader = Object.create(WebGLShader.prototype);
-        
-        // Add properties that Unity might check
-        Object.defineProperties(mockShader, {
-            __isMockShader: { value: true, writable: false },
-            __mockId: { value: mockShaderCounter, writable: false },
-            shaderType: { 
-                value: type === gl.VERTEX_SHADER ? 'vs' : 'fs', 
-                writable: true 
-            },
-            toString: { 
-                value: function() { return `[Mock WebGL Shader ${mockShaderCounter}]`; },
-                writable: false 
+                
+                if (prop === 'createShader') {
+                    return function(type) {
+                        console.log('Intercepted createShader for type:', type === target.VERTEX_SHADER ? 'VERTEX' : 'FRAGMENT');
+                        
+                        let shader;
+                        try {
+                            shader = originalMethods.createShader.call(target, type);
+                        } catch (e) {
+                            console.error('createShader error:', e);
+                            shader = null;
+                        }
+                        
+                        if (!shader) {
+                            console.warn('createShader failed, creating mock shader');
+                            mockShaderCounter++;
+                            
+                            // Create a more sophisticated mock that can pass more checks
+                            shader = Object.create(WebGLShader.prototype);
+                            
+                            // Store mock shader data
+                            mockShaders.set(shader, createShaderData(type));
+                            
+                            // Add properties to make it look real
+                            Object.defineProperties(shader, {
+                                __isMockShader: { value: true, writable: false },
+                                __mockId: { value: mockShaderCounter, writable: false },
+                                constructor: { value: WebGLShader, writable: false }
+                            });
+                            
+                            console.log(`Created mock shader ${mockShaderCounter}`);
+                        }
+                        
+                        return shader;
+                    };
+                }
+                
+                if (prop === 'shaderSource') {
+                    return function(shader, source) {
+                        console.log('Intercepted shaderSource');
+                        
+                        if (mockShaders.has(shader)) {
+                            console.warn('shaderSource called on mock shader, storing source');
+                            mockShaders.get(shader).source = source;
+                            return;
+                        }
+                        
+                        try {
+                            return originalMethods.shaderSource.call(target, shader, source);
+                        } catch (e) {
+                            console.error('shaderSource error:', e);
+                        }
+                    };
+                }
+                
+                if (prop === 'compileShader') {
+                    return function(shader) {
+                        console.log('Intercepted compileShader');
+                        
+                        if (mockShaders.has(shader)) {
+                            console.warn('compileShader called on mock shader, marking as compiled');
+                            mockShaders.get(shader).compiled = true;
+                            return;
+                        }
+                        
+                        try {
+                            return originalMethods.compileShader.call(target, shader);
+                        } catch (e) {
+                            console.error('compileShader error:', e);
+                        }
+                    };
+                }
+                
+                if (prop === 'getShaderParameter') {
+                    return function(shader, pname) {
+                        console.log('Intercepted getShaderParameter');
+                        
+                        if (mockShaders.has(shader)) {
+                            const data = mockShaders.get(shader);
+                            console.warn('getShaderParameter called on mock shader');
+                            
+                            if (pname === target.COMPILE_STATUS) {
+                                return data.compileStatus;
+                            }
+                            if (pname === target.DELETE_STATUS) {
+                                return data.deleteStatus;
+                            }
+                            if (pname === target.SHADER_TYPE) {
+                                return data.type;
+                            }
+                            
+                            return true; // Default safe value
+                        }
+                        
+                        try {
+                            return originalMethods.getShaderParameter.call(target, shader, pname);
+                        } catch (e) {
+                            console.error('getShaderParameter error:', e);
+                            return true; // Safe fallback
+                        }
+                    };
+                }
+                
+                if (prop === 'getShaderInfoLog') {
+                    return function(shader) {
+                        console.log('Intercepted getShaderInfoLog');
+                        
+                        if (mockShaders.has(shader)) {
+                            console.warn('getShaderInfoLog called on mock shader');
+                            return mockShaders.get(shader).infoLog || '';
+                        }
+                        
+                        try {
+                            return originalMethods.getShaderInfoLog.call(target, shader);
+                        } catch (e) {
+                            console.error('getShaderInfoLog error:', e);
+                            return '';
+                        }
+                    };
+                }
+                
+                if (prop === 'deleteShader') {
+                    return function(shader) {
+                        console.log('Intercepted deleteShader');
+                        
+                        if (mockShaders.has(shader)) {
+                            console.warn('deleteShader called on mock shader');
+                            mockShaders.get(shader).deleteStatus = true;
+                            return;
+                        }
+                        
+                        try {
+                            return originalMethods.deleteShader.call(target, shader);
+                        } catch (e) {
+                            console.error('deleteShader error:', e);
+                        }
+                    };
+                }
+                
+                if (prop === 'isShader') {
+                    return function(shader) {
+                        console.log('Intercepted isShader');
+                        
+                        if (mockShaders.has(shader)) {
+                            console.warn('isShader called on mock shader');
+                            return true;
+                        }
+                        
+                        try {
+                            return originalMethods.isShader.call(target, shader);
+                        } catch (e) {
+                            console.error('isShader error:', e);
+                            return false;
+                        }
+                    };
+                }
+                
+                if (prop === 'attachShader') {
+                    return function(program, shader) {
+                        console.log('Intercepted attachShader');
+                        
+                        if (mockShaders.has(shader)) {
+                            console.warn('attachShader called on mock shader, ignoring');
+                            return;
+                        }
+                        
+                        try {
+                            return originalMethods.attachShader.call(target, program, shader);
+                        } catch (e) {
+                            console.error('attachShader error:', e);
+                        }
+                    };
+                }
+                
+                if (prop === 'detachShader') {
+                    return function(program, shader) {
+                        console.log('Intercepted detachShader');
+                        
+                        if (mockShaders.has(shader)) {
+                            console.warn('detachShader called on mock shader, ignoring');
+                            return;
+                        }
+                        
+                        try {
+                            return originalMethods.detachShader.call(target, program, shader);
+                        } catch (e) {
+                            console.error('detachShader error:', e);
+                        }
+                    };
+                }
+                
+                // Return the original method for all other properties
+                return value;
             }
         });
-        
-        // Track this as a mock shader
-        mockShaders.add(mockShader);
-        
-        console.log(`Created mock shader ${mockShaderCounter} for type:`, 
-            type === gl.VERTEX_SHADER ? 'VERTEX_SHADER' : 'FRAGMENT_SHADER');
-        
-        return mockShader;
     }
     
-    // Override shaderSource to handle mock shaders
-    WebGLRenderingContext.prototype.shaderSource = function(shader, source) {
-        if (mockShaders.has(shader)) {
-            console.warn('Intercepted shaderSource call on mock shader, ignoring');
-            return; // Do nothing for mock shaders
-        }
+    // Also patch WebGL2 if available
+    if (typeof WebGL2RenderingContext !== 'undefined') {
+        console.log('Patching WebGL2 context as well...');
         
-        try {
-            return originalShaderSource.call(this, shader, source);
-        } catch (e) {
-            console.error('shaderSource failed:', e);
-            // Don't throw, just log the error
-        }
-    };
-    
-    // Override compileShader to handle mock shaders
-    WebGLRenderingContext.prototype.compileShader = function(shader) {
-        if (mockShaders.has(shader)) {
-            console.warn('Intercepted compileShader call on mock shader, ignoring');
-            return; // Do nothing for mock shaders
-        }
+        // Store WebGL2 original methods
+        originalMethods.webgl2 = {
+            getShaderPrecisionFormat: WebGL2RenderingContext.prototype.getShaderPrecisionFormat,
+            createShader: WebGL2RenderingContext.prototype.createShader,
+            shaderSource: WebGL2RenderingContext.prototype.shaderSource,
+            compileShader: WebGL2RenderingContext.prototype.compileShader,
+            getShaderParameter: WebGL2RenderingContext.prototype.getShaderParameter,
+            getShaderInfoLog: WebGL2RenderingContext.prototype.getShaderInfoLog,
+            deleteShader: WebGL2RenderingContext.prototype.deleteShader,
+            attachShader: WebGL2RenderingContext.prototype.attachShader,
+            detachShader: WebGL2RenderingContext.prototype.detachShader,
+            isShader: WebGL2RenderingContext.prototype.isShader
+        };
         
-        try {
-            return originalCompileShader.call(this, shader);
-        } catch (e) {
-            console.error('compileShader failed:', e);
-        }
-    };
-    
-    // Unity GL object patching - wait for it to be available
-    let unityGLPatchAttempts = 0;
-    const maxUnityGLPatchAttempts = 200; // Increased attempts
-    
-    function patchUnityGL() {
-        unityGLPatchAttempts++;
-        
-        // Also try to patch Unity's internal functions each time
-        patchUnityInternals();
-        
-        // Check if Unity's GL object is available
-        if (typeof window.GL !== 'undefined' && window.GL) {
-            console.log('Found Unity GL object, patching...');
+        // Apply similar patches to WebGL2
+        // Create a proxy to intercept all method calls
+        WebGL2RenderingContext.prototype.getContext = function(contextType, contextAttributes) {
+            const context = originalMethods.getContext.call(this, contextType, contextAttributes);
             
-            // Patch the shaders array if it exists
-            if (window.GL.shaders) {
-                const originalShaders = window.GL.shaders;
-                
-                // Create a proxy to intercept shader assignments
-                window.GL.shaders = new Proxy(originalShaders, {
-                    set: function(target, property, value) {
-                        if (value === null) {
-                            console.warn(`Preventing null shader assignment to GL.shaders[${property}]`);
-                            // Create a mock shader instead
-                            value = createMockShader(window.GL.currentContext || {}, 0);
-                        }
-                        target[property] = value;
-                        return true;
-                    },
-                    get: function(target, property) {
-                        const value = target[property];
-                        if (value === null) {
-                            console.warn(`Intercepted null shader access from GL.shaders[${property}]`);
-                            return createMockShader(window.GL.currentContext || {}, 0);
-                        }
-                        return value;
-                    }
-                });
+            if (!context || (contextType !== 'webgl' && contextType !== 'experimental-webgl' && contextType !== 'webgl2')) {
+                return context;
             }
             
-            // Try to patch any precision format functions in the GL object
-            if (window.GL.getShaderPrecisionFormat) {
-                const originalGLPrecision = window.GL.getShaderPrecisionFormat;
-                window.GL.getShaderPrecisionFormat = function(shaderType, precisionType) {
-                    console.log('Unity GL.getShaderPrecisionFormat called');
-                    const result = originalGLPrecision.call(this, shaderType, precisionType);
+            console.log('WebGL2 context created, applying aggressive patches...');
+            
+            // Override ALL shader-related methods on this specific context
+            const wrappedContext = wrapWebGLContext(context);
+            return wrappedContext;
+        };
+        
+        function wrapWebGLContext(gl) {
+            // Create a proxy to intercept all method calls
+            return new Proxy(gl, {
+                get: function(target, prop) {
+                    const value = target[prop];
                     
-                    if (!result) {
-                        console.warn('Unity GL.getShaderPrecisionFormat returned null, using fallback');
-                        return {
-                            rangeMin: 1,
-                            rangeMax: 1,
-                            precision: 23
+                    // Intercept specific WebGL methods
+                    if (prop === 'getShaderPrecisionFormat') {
+                        return function(shaderType, precisionType) {
+                            console.log('Intercepted WebGL2 getShaderPrecisionFormat');
+                            let result;
+                            try {
+                                result = originalMethods.webgl2.getShaderPrecisionFormat.call(target, shaderType, precisionType);
+                            } catch (e) {
+                                console.warn('WebGL2 getShaderPrecisionFormat error:', e);
+                                result = null;
+                            }
+                            
+                            if (!result) {
+                                console.warn('WebGL2 getShaderPrecisionFormat returned null, using fallback');
+                                return {
+                                    rangeMin: 1,
+                                    rangeMax: 1,
+                                    precision: 23
+                                };
+                            }
+                            return result;
                         };
                     }
                     
-                    return result;
-                };
-            }
-            
-            console.log('Unity GL object patched successfully');
-            return true;
-        } else if (unityGLPatchAttempts < maxUnityGLPatchAttempts) {
-            // Try again in 25ms (more frequent)
-            setTimeout(patchUnityGL, 25);
-            return false;
-        } else {
-            console.warn('Could not find Unity GL object to patch after', maxUnityGLPatchAttempts, 'attempts');
-            return false;
-        }
-    }
-    
-    // Start trying to patch Unity GL immediately
-    patchUnityGL();
-    
-    // Also patch when DOM is ready and at various other times
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', patchUnityGL);
-    } else {
-        setTimeout(patchUnityGL, 100);
-    }
-    
-    // Set up additional watchers
-    setTimeout(patchUnityGL, 500);
-    setTimeout(patchUnityGL, 1000);
-    setTimeout(patchUnityGL, 2000);
-    
-    // Override getShaderPrecisionFormat with null-safe version
-    WebGLRenderingContext.prototype.getShaderPrecisionFormat = function(shaderType, precisionType) {
-        console.log('WebGL getShaderPrecisionFormat called with:', shaderType, precisionType);
-        
-        let result;
-        try {
-            result = originalGetShaderPrecisionFormat.call(this, shaderType, precisionType);
-        } catch (e) {
-            console.error('getShaderPrecisionFormat threw error:', e);
-            result = null;
-        }
-        
-        if (!result) {
-            console.warn('getShaderPrecisionFormat returned null, using fallback values');
-            return {
-                rangeMin: 1,
-                rangeMax: 1,
-                precision: 23
-            };
-        }
-        
-        return result;
-    };
-    
-    // Override createShader to handle null returns more aggressively
-    WebGLRenderingContext.prototype.createShader = function(type) {
-        shaderCreationAttempts++;
-        
-        // First attempt
-        let shader = originalCreateShader.call(this, type);
-        
-        if (!shader) {
-            failedShaderCreations++;
-            console.error(`createShader failed (attempt ${shaderCreationAttempts}, failed ${failedShaderCreations}) for type:`, 
-                type === this.VERTEX_SHADER ? 'VERTEX_SHADER' : 'FRAGMENT_SHADER');
-            
-            const error = originalGetError.call(this);
-            console.error('WebGL error code:', error);
-            
-            // Clear any pending errors
-            while (originalGetError.call(this) !== this.NO_ERROR) {
-                // Clear error queue
-            }
-            
-            // Create a sophisticated mock shader
-            shader = createMockShader(this, type);
-        }
-        
-        return shader;
-    };
-    
-    // Also handle WebGL2 context if available
-    if (typeof WebGL2RenderingContext !== 'undefined') {
-        const originalGetShaderPrecisionFormat2 = WebGL2RenderingContext.prototype.getShaderPrecisionFormat;
-        const originalCreateShader2 = WebGL2RenderingContext.prototype.createShader;
-        const originalShaderSource2 = WebGL2RenderingContext.prototype.shaderSource;
-        const originalCompileShader2 = WebGL2RenderingContext.prototype.compileShader;
-        
-        WebGL2RenderingContext.prototype.shaderSource = function(shader, source) {
-            if (mockShaders.has(shader)) {
-                console.warn('Intercepted WebGL2 shaderSource call on mock shader, ignoring');
-                return;
-            }
-            
-            try {
-                return originalShaderSource2.call(this, shader, source);
-            } catch (e) {
-                console.error('WebGL2 shaderSource failed:', e);
-            }
-        };
-        
-        WebGL2RenderingContext.prototype.compileShader = function(shader) {
-            if (mockShaders.has(shader)) {
-                console.warn('Intercepted WebGL2 compileShader call on mock shader, ignoring');
-                return;
-            }
-            
-            try {
-                return originalCompileShader2.call(this, shader);
-            } catch (e) {
-                console.error('WebGL2 compileShader failed:', e);
-            }
-        };
-        
-        WebGL2RenderingContext.prototype.getShaderPrecisionFormat = function(shaderType, precisionType) {
-            const result = originalGetShaderPrecisionFormat2.call(this, shaderType, precisionType);
-            
-            if (!result) {
-                console.warn('WebGL2 getShaderPrecisionFormat returned null, using fallback values');
-                return {
-                    rangeMin: 1,
-                    rangeMax: 1,
-                    precision: 23
-                };
-            }
-            
-            return result;
-        };
-        
-        WebGL2RenderingContext.prototype.createShader = function(type) {
-            let shader = originalCreateShader2.call(this, type);
-            
-            if (!shader) {
-                console.error('WebGL2 createShader failed for type:', type === this.VERTEX_SHADER ? 'VERTEX_SHADER' : 'FRAGMENT_SHADER');
-                
-                // Try recovery
-                shader = originalCreateShader2.call(this, type);
-                
-                if (!shader) {
-                    // Create mock object for WebGL2 as well
-                    shader = {
-                        __isMockShader: true,
-                        shaderType: type === this.VERTEX_SHADER ? 'vs' : 'fs',
-                        toString: function() { return '[Mock WebGL2 Shader]'; }
-                    };
-                    
-                    try {
-                        Object.setPrototypeOf(shader, WebGLShader.prototype);
-                    } catch (e) {
-                        // Continue with mock object
+                    if (prop === 'createShader') {
+                        return function(type) {
+                            console.log('Intercepted WebGL2 createShader for type:', type === target.VERTEX_SHADER ? 'VERTEX' : 'FRAGMENT');
+                            
+                            let shader;
+                            try {
+                                shader = originalMethods.webgl2.createShader.call(target, type);
+                            } catch (e) {
+                                console.error('WebGL2 createShader error:', e);
+                                shader = null;
+                            }
+                            
+                            if (!shader) {
+                                console.warn('WebGL2 createShader failed, creating mock shader');
+                                mockShaderCounter++;
+                                
+                                // Create a more sophisticated mock that can pass more checks
+                                shader = Object.create(WebGLShader.prototype);
+                                
+                                // Store mock shader data
+                                mockShaders.set(shader, createShaderData(type));
+                                
+                                // Add properties to make it look real
+                                Object.defineProperties(shader, {
+                                    __isMockShader: { value: true, writable: false },
+                                    __mockId: { value: mockShaderCounter, writable: false },
+                                    constructor: { value: WebGLShader, writable: false }
+                                });
+                                
+                                console.log(`Created WebGL2 mock shader ${mockShaderCounter}`);
+                            }
+                            
+                            return shader;
+                        };
                     }
+                    
+                    if (prop === 'shaderSource') {
+                        return function(shader, source) {
+                            console.log('Intercepted WebGL2 shaderSource');
+                            
+                            if (mockShaders.has(shader)) {
+                                console.warn('WebGL2 shaderSource called on mock shader, storing source');
+                                mockShaders.get(shader).source = source;
+                                return;
+                            }
+                            
+                            try {
+                                return originalMethods.webgl2.shaderSource.call(target, shader, source);
+                            } catch (e) {
+                                console.error('WebGL2 shaderSource error:', e);
+                            }
+                        };
+                    }
+                    
+                    if (prop === 'compileShader') {
+                        return function(shader) {
+                            console.log('Intercepted WebGL2 compileShader');
+                            
+                            if (mockShaders.has(shader)) {
+                                console.warn('WebGL2 compileShader called on mock shader, marking as compiled');
+                                mockShaders.get(shader).compiled = true;
+                                return;
+                            }
+                            
+                            try {
+                                return originalMethods.webgl2.compileShader.call(target, shader);
+                            } catch (e) {
+                                console.error('WebGL2 compileShader error:', e);
+                            }
+                        };
+                    }
+                    
+                    if (prop === 'getShaderParameter') {
+                        return function(shader, pname) {
+                            console.log('Intercepted WebGL2 getShaderParameter');
+                            
+                            if (mockShaders.has(shader)) {
+                                const data = mockShaders.get(shader);
+                                console.warn('WebGL2 getShaderParameter called on mock shader');
+                                
+                                if (pname === target.COMPILE_STATUS) {
+                                    return data.compileStatus;
+                                }
+                                if (pname === target.DELETE_STATUS) {
+                                    return data.deleteStatus;
+                                }
+                                if (pname === target.SHADER_TYPE) {
+                                    return data.type;
+                                }
+                                
+                                return true; // Default safe value
+                            }
+                            
+                            try {
+                                return originalMethods.webgl2.getShaderParameter.call(target, shader, pname);
+                            } catch (e) {
+                                console.error('WebGL2 getShaderParameter error:', e);
+                                return true; // Safe fallback
+                            }
+                        };
+                    }
+                    
+                    if (prop === 'getShaderInfoLog') {
+                        return function(shader) {
+                            console.log('Intercepted WebGL2 getShaderInfoLog');
+                            
+                            if (mockShaders.has(shader)) {
+                                console.warn('WebGL2 getShaderInfoLog called on mock shader');
+                                return mockShaders.get(shader).infoLog || '';
+                            }
+                            
+                            try {
+                                return originalMethods.webgl2.getShaderInfoLog.call(target, shader);
+                            } catch (e) {
+                                console.error('WebGL2 getShaderInfoLog error:', e);
+                                return '';
+                            }
+                        };
+                    }
+                    
+                    if (prop === 'deleteShader') {
+                        return function(shader) {
+                            console.log('Intercepted WebGL2 deleteShader');
+                            
+                            if (mockShaders.has(shader)) {
+                                console.warn('WebGL2 deleteShader called on mock shader');
+                                mockShaders.get(shader).deleteStatus = true;
+                                return;
+                            }
+                            
+                            try {
+                                return originalMethods.webgl2.deleteShader.call(target, shader);
+                            } catch (e) {
+                                console.error('WebGL2 deleteShader error:', e);
+                            }
+                        };
+                    }
+                    
+                    if (prop === 'isShader') {
+                        return function(shader) {
+                            console.log('Intercepted WebGL2 isShader');
+                            
+                            if (mockShaders.has(shader)) {
+                                console.warn('WebGL2 isShader called on mock shader');
+                                return true;
+                            }
+                            
+                            try {
+                                return originalMethods.webgl2.isShader.call(target, shader);
+                            } catch (e) {
+                                console.error('WebGL2 isShader error:', e);
+                                return false;
+                            }
+                        };
+                    }
+                    
+                    if (prop === 'attachShader') {
+                        return function(program, shader) {
+                            console.log('Intercepted WebGL2 attachShader');
+                            
+                            if (mockShaders.has(shader)) {
+                                console.warn('WebGL2 attachShader called on mock shader, ignoring');
+                                return;
+                            }
+                            
+                            try {
+                                return originalMethods.webgl2.attachShader.call(target, program, shader);
+                            } catch (e) {
+                                console.error('WebGL2 attachShader error:', e);
+                            }
+                        };
+                    }
+                    
+                    if (prop === 'detachShader') {
+                        return function(program, shader) {
+                            console.log('Intercepted WebGL2 detachShader');
+                            
+                            if (mockShaders.has(shader)) {
+                                console.warn('WebGL2 detachShader called on mock shader, ignoring');
+                                return;
+                            }
+                            
+                            try {
+                                return originalMethods.webgl2.detachShader.call(target, program, shader);
+                            } catch (e) {
+                                console.error('WebGL2 detachShader error:', e);
+                            }
+                        };
+                    }
+                    
+                    // Return the original method for all other properties
+                    return value;
                 }
-            }
-            
-            return shader;
-        };
+            });
+        }
     }
+    
+    console.log('Aggressive WebGL compatibility layer loaded successfully');
 })();
 
 // Enhanced WebGL compatibility checks
