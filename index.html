@@ -63,6 +63,10 @@
         productName: "Pixel Golf",
         productVersion: "1.0",
         showBanner: unityShowBanner,
+        // Memory management for mobile
+        totalMemory: 134217728, // 128MB instead of default 256MB
+        // Disable threading which can cause mobile issues
+        pthreadPoolSize: 0,
         errorHandler: function(err, url, line) {
            alert("error " + err + " occurred at line " + line + " for URL: " + url);
            // Return 'true' if you handled this error and don't want Unity
@@ -100,6 +104,14 @@
         // To lower canvas resolution on mobile devices to gain some
         // performance, uncomment the following line:
         config.devicePixelRatio = 1;
+        
+        // Additional mobile optimizations
+        config.matchWebGLToCanvasSize = false;
+        config.powerPreference = "default";
+        
+        // Reduce memory pressure on mobile
+        canvas.style.width = "100%";
+        canvas.style.height = "60vh"; // Smaller height for mobile
 
 
       } else {
