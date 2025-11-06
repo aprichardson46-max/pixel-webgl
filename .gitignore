@@ -1,1 +1,2 @@
-.DS_Store
+# Allow Unity build files
+*.DS_Store
