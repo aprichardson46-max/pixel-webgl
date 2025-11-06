@@ -25,6 +25,16 @@
     </div>
     <script>
       var canvas = document.querySelector("#unity-canvas");
+      
+      // Add WebGL context lost/restored handlers
+      canvas.addEventListener('webglcontextlost', function(e) {
+        console.error('WebGL context lost!', e);
+        e.preventDefault();
+      }, false);
+      
+      canvas.addEventListener('webglcontextrestored', function(e) {
+        console.log('WebGL context restored', e);
+      }, false);
 
       // Shows a temporary message banner/ribbon for a few seconds, or
       // a permanent error message on top of the canvas if type=='error'.
@@ -63,10 +73,23 @@
         productName: "Pixel Golf",
         productVersion: "1.0",
         showBanner: unityShowBanner,
-        // Memory management for mobile
-        totalMemory: 134217728, // 128MB instead of default 256MB
+        // Memory management for mobile - more aggressive
+        totalMemory: 67108864, // 64MB instead of 128MB
         // Disable threading which can cause mobile issues
         pthreadPoolSize: 0,
+        // Force minimal memory usage
+        initialMemorySize: 16777216, // 16MB initial
+        // Force WebGL 1.0 for better mobile compatibility
+        webglContextAttributes: {
+          preserveDrawingBuffer: false,
+          premultipliedAlpha: false,
+          alpha: false,
+          antialias: false,
+          depth: true,
+          failIfMajorPerformanceCaveat: false,
+          powerPreference: "default",
+          stencil: false
+        },
         errorHandler: function(err, url, line) {
            alert("error " + err + " occurred at line " + line + " for URL: " + url);
            // Return 'true' if you handled this error and don't want Unity
@@ -125,18 +148,27 @@
       var script = document.createElement("script");
       script.src = loaderUrl;
       script.onload = () => {
+        console.log("Unity loader script loaded successfully");
+        console.log("Starting Unity instance creation...");
         createUnityInstance(canvas, config, (progress) => {
+          console.log("Unity loading progress: " + (100 * progress) + "%");
           document.querySelector("#unity-progress-bar-full").style.width = 100 * progress + "%";
               }).then((unityInstance) => {
+                console.log("Unity instance created successfully!");
                 document.querySelector("#unity-loading-bar").style.display = "none";
                 document.querySelector("#unity-fullscreen-button").onclick = () => {
                   unityInstance.SetFullscreen(1);
                 };
 
               }).catch((message) => {
-                alert(message);
+                console.error("Unity instance creation failed:", message);
+                alert("Unity failed to load: " + message);
               });
             };
+      script.onerror = (error) => {
+        console.error("Failed to load Unity loader script:", error);
+        alert("Failed to load Unity loader script");
+      };
 
       document.body.appendChild(script);
 
