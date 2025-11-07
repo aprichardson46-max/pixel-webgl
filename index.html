@@ -108,6 +108,87 @@
 
       loadingBar.style.display = "block";
 
+      // WebGL comprehensive polyfill for mobile browsers
+      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        // Override WebGL context creation to add comprehensive mobile compatibility fixes
+        const originalGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function(contextType, options) {
+          const context = originalGetContext.call(this, contextType, options);
+          
+          if (context && (contextType === 'webgl' || contextType === 'experimental-webgl')) {
+            console.log('Applying WebGL polyfills for mobile compatibility');
+            
+            // Fix shader precision format issues
+            const originalGetShaderPrecisionFormat = context.getShaderPrecisionFormat;
+            context.getShaderPrecisionFormat = function(shaderType, precisionType) {
+              try {
+                const result = originalGetShaderPrecisionFormat.call(this, shaderType, precisionType);
+                
+                // If the result is null or invalid, provide safe fallback values
+                if (!result || result.rangeMin === undefined || result.rangeMax === undefined || result.precision === undefined) {
+                  console.warn('getShaderPrecisionFormat returned null, using fallback values for shaderType:', shaderType, 'precisionType:', precisionType);
+                  return {
+                    rangeMin: 127,
+                    rangeMax: 127,
+                    precision: 23
+                  };
+                }
+                
+                return result;
+              } catch (e) {
+                console.warn('getShaderPrecisionFormat error, using fallback:', e);
+                return {
+                  rangeMin: 127,
+                  rangeMax: 127,
+                  precision: 23
+                };
+              }
+            };
+
+            // Fix shader creation issues
+            const originalCreateShader = context.createShader;
+            context.createShader = function(type) {
+              try {
+                const shader = originalCreateShader.call(this, type);
+                if (!shader) {
+                  console.warn('createShader returned null, retrying...');
+                  // Retry shader creation
+                  return originalCreateShader.call(this, type);
+                }
+                return shader;
+              } catch (e) {
+                console.error('Shader creation failed:', e);
+                return null;
+              }
+            };
+
+            // Fix extension handling
+            const originalGetExtension = context.getExtension;
+            context.getExtension = function(name) {
+              try {
+                return originalGetExtension.call(this, name);
+              } catch (e) {
+                console.warn('Extension', name, 'not available:', e);
+                return null;
+              }
+            };
+
+            // Fix getSupportedExtensions
+            const originalGetSupportedExtensions = context.getSupportedExtensions;
+            context.getSupportedExtensions = function() {
+              try {
+                return originalGetSupportedExtensions.call(this) || [];
+              } catch (e) {
+                console.warn('getSupportedExtensions failed:', e);
+                return [];
+              }
+            };
+          }
+          
+          return context;
+        };
+      }
+
       var script = document.createElement("script");
       script.src = loaderUrl;
       script.onload = () => {
