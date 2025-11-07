@@ -96,7 +96,10 @@
 
         // To lower canvas resolution on mobile devices to gain some
         // performance, uncomment the following line:
-        // config.devicePixelRatio = 1;
+        config.devicePixelRatio = 0.75; // Reduce pixel density for mobile
+
+        // Reduce memory allocation for mobile
+        config.matchWebGLToCanvasSize = false;
 
         unityShowBanner('WebGL builds are not supported on mobile devices.');
       } else {
@@ -113,6 +116,19 @@
         // Override WebGL context creation to add comprehensive mobile compatibility fixes
         const originalGetContext = HTMLCanvasElement.prototype.getContext;
         HTMLCanvasElement.prototype.getContext = function(contextType, options) {
+          // Force conservative WebGL context options for mobile
+          if (contextType === 'webgl' || contextType === 'experimental-webgl') {
+            options = options || {};
+            options.alpha = false;
+            options.antialias = false;
+            options.depth = true;
+            options.stencil = false;
+            options.premultipliedAlpha = false;
+            options.preserveDrawingBuffer = false;
+            options.powerPreference = "low-power";
+            options.failIfMajorPerformanceCaveat = false;
+          }
+          
           const context = originalGetContext.call(this, contextType, options);
           
           if (context && (contextType === 'webgl' || contextType === 'experimental-webgl')) {
@@ -161,6 +177,40 @@
                 return null;
               }
             };
+
+            // Limit texture units to mobile-safe values
+            const originalGetParameter = context.getParameter;
+            context.getParameter = function(pname) {
+              try {
+                const result = originalGetParameter.call(this, pname);
+                
+                // Limit texture units to prevent "Invalid texture unit" errors
+                if (pname === context.MAX_TEXTURE_IMAGE_UNITS) {
+                  return Math.min(result || 8, 8); // Limit to 8 texture units
+                }
+                if (pname === context.MAX_COMBINED_TEXTURE_IMAGE_UNITS) {
+                  return Math.min(result || 8, 8); // Limit combined texture units
+                }
+                if (pname === context.MAX_VERTEX_TEXTURE_IMAGE_UNITS) {
+                  return Math.min(result || 4, 4); // Limit vertex texture units
+                }
+                
+                return result;
+              } catch (e) {
+                console.warn('getParameter error for', pname, ':', e);
+                return null;
+              }
+            };
+
+            // Add context lost handling
+            this.addEventListener('webglcontextlost', function(event) {
+              console.warn('WebGL context lost, preventing default...');
+              event.preventDefault();
+            });
+
+            this.addEventListener('webglcontextrestored', function(event) {
+              console.log('WebGL context restored');
+            });
 
             // Fix extension handling
             const originalGetExtension = context.getExtension;
