@@ -113,26 +113,74 @@
 
       // WebGL comprehensive polyfill for mobile browsers
       if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-        // Override WebGL context creation to add comprehensive mobile compatibility fixes
+        // Ultra-conservative WebGL context creation for mobile
         const originalGetContext = HTMLCanvasElement.prototype.getContext;
         HTMLCanvasElement.prototype.getContext = function(contextType, options) {
-          // Force conservative WebGL context options for mobile
+          // Force extremely conservative WebGL context options for mobile
           if (contextType === 'webgl' || contextType === 'experimental-webgl') {
-            options = options || {};
-            options.alpha = false;
-            options.antialias = false;
-            options.depth = true;
-            options.stencil = false;
-            options.premultipliedAlpha = false;
-            options.preserveDrawingBuffer = false;
-            options.powerPreference = "low-power";
-            options.failIfMajorPerformanceCaveat = false;
+            options = {
+              alpha: false,
+              antialias: false,
+              depth: false, // Disable depth buffer to reduce memory
+              stencil: false,
+              premultipliedAlpha: false,
+              preserveDrawingBuffer: false,
+              powerPreference: "low-power",
+              failIfMajorPerformanceCaveat: false,
+              desynchronized: false
+            };
+            
+            console.log('Attempting WebGL context creation with ultra-conservative settings');
           }
           
-          const context = originalGetContext.call(this, contextType, options);
+          let context = null;
+          
+          // Try multiple context creation attempts
+          try {
+            context = originalGetContext.call(this, contextType, options);
+            
+            // If webgl fails, try experimental-webgl
+            if (!context && contextType === 'webgl') {
+              console.warn('WebGL failed, trying experimental-webgl');
+              context = originalGetContext.call(this, 'experimental-webgl', options);
+            }
+            
+            if (!context) {
+              console.error('All WebGL context creation attempts failed');
+              return null;
+            }
+            
+          } catch (e) {
+            console.error('WebGL context creation threw error:', e);
+            return null;
+          }
           
           if (context && (contextType === 'webgl' || contextType === 'experimental-webgl')) {
-            console.log('Applying WebGL polyfills for mobile compatibility');
+            console.log('WebGL context created successfully, applying mobile polyfills');
+            
+            // Prevent context loss at the source
+            const canvas = this;
+            let contextLossCount = 0;
+            
+            canvas.addEventListener('webglcontextlost', function(event) {
+              contextLossCount++;
+              console.warn('WebGL context lost event #' + contextLossCount + ', preventing default...');
+              event.preventDefault();
+              event.stopPropagation();
+              return false;
+            }, true);
+
+            canvas.addEventListener('webglcontextrestored', function(event) {
+              console.log('WebGL context restored');
+            }, true);
+            
+            // Override context loss methods to prevent loss
+            if (context.getExtension('WEBGL_lose_context')) {
+              const loseContextExt = context.getExtension('WEBGL_lose_context');
+              loseContextExt.loseContext = function() {
+                console.warn('Blocked context loss attempt');
+              };
+            }
             
             // Fix shader precision format issues
             const originalGetShaderPrecisionFormat = context.getShaderPrecisionFormat;
@@ -140,9 +188,7 @@
               try {
                 const result = originalGetShaderPrecisionFormat.call(this, shaderType, precisionType);
                 
-                // If the result is null or invalid, provide safe fallback values
                 if (!result || result.rangeMin === undefined || result.rangeMax === undefined || result.precision === undefined) {
-                  console.warn('getShaderPrecisionFormat returned null, using fallback values for shaderType:', shaderType, 'precisionType:', precisionType);
                   return {
                     rangeMin: 127,
                     rangeMax: 127,
@@ -152,7 +198,6 @@
                 
                 return result;
               } catch (e) {
-                console.warn('getShaderPrecisionFormat error, using fallback:', e);
                 return {
                   rangeMin: 127,
                   rangeMax: 127,
@@ -161,16 +206,16 @@
               }
             };
 
-            // Fix shader creation issues
+            // Fix shader creation with better error handling
             const originalCreateShader = context.createShader;
             context.createShader = function(type) {
               try {
-                const shader = originalCreateShader.call(this, type);
-                if (!shader) {
-                  console.warn('createShader returned null, retrying...');
-                  // Retry shader creation
-                  return originalCreateShader.call(this, type);
+                if (context.isContextLost && context.isContextLost()) {
+                  console.warn('Cannot create shader - context is lost');
+                  return null;
                 }
+                
+                const shader = originalCreateShader.call(this, type);
                 return shader;
               } catch (e) {
                 console.error('Shader creation failed:', e);
@@ -178,47 +223,39 @@
               }
             };
 
-            // Limit texture units to mobile-safe values
+            // Limit texture units aggressively
             const originalGetParameter = context.getParameter;
             context.getParameter = function(pname) {
               try {
                 const result = originalGetParameter.call(this, pname);
                 
-                // Limit texture units to prevent "Invalid texture unit" errors
+                // Extremely conservative texture unit limits
                 if (pname === context.MAX_TEXTURE_IMAGE_UNITS) {
-                  return Math.min(result || 8, 8); // Limit to 8 texture units
+                  return Math.min(result || 4, 4); // Limit to 4 texture units max
                 }
                 if (pname === context.MAX_COMBINED_TEXTURE_IMAGE_UNITS) {
-                  return Math.min(result || 8, 8); // Limit combined texture units
+                  return Math.min(result || 4, 4);
                 }
                 if (pname === context.MAX_VERTEX_TEXTURE_IMAGE_UNITS) {
-                  return Math.min(result || 4, 4); // Limit vertex texture units
+                  return Math.min(result || 0, 0); // Disable vertex texture units
                 }
                 
                 return result;
               } catch (e) {
                 console.warn('getParameter error for', pname, ':', e);
-                return null;
+                return 0; // Return safe default
               }
             };
-
-            // Add context lost handling
-            this.addEventListener('webglcontextlost', function(event) {
-              console.warn('WebGL context lost, preventing default...');
-              event.preventDefault();
-            });
-
-            this.addEventListener('webglcontextrestored', function(event) {
-              console.log('WebGL context restored');
-            });
 
             // Fix extension handling
             const originalGetExtension = context.getExtension;
             context.getExtension = function(name) {
               try {
+                if (context.isContextLost && context.isContextLost()) {
+                  return null;
+                }
                 return originalGetExtension.call(this, name);
               } catch (e) {
-                console.warn('Extension', name, 'not available:', e);
                 return null;
               }
             };
@@ -227,9 +264,11 @@
             const originalGetSupportedExtensions = context.getSupportedExtensions;
             context.getSupportedExtensions = function() {
               try {
+                if (context.isContextLost && context.isContextLost()) {
+                  return [];
+                }
                 return originalGetSupportedExtensions.call(this) || [];
               } catch (e) {
-                console.warn('getSupportedExtensions failed:', e);
                 return [];
               }
             };
