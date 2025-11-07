@@ -101,6 +101,57 @@
         // Reduce memory allocation for mobile
         config.matchWebGLToCanvasSize = false;
 
+        // Test WebGL compatibility before showing Unity loader
+        function testWebGLCompatibility() {
+          try {
+            var testCanvas = document.createElement('canvas');
+            var testContext = testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl');
+            
+            if (!testContext) {
+              return false;
+            }
+            
+            // Test if context gets lost immediately
+            setTimeout(function() {
+              if (testContext.isContextLost && testContext.isContextLost()) {
+                showMobileIncompatibilityMessage();
+                return false;
+              }
+            }, 100);
+            
+            return true;
+          } catch (e) {
+            return false;
+          }
+        }
+
+        function showMobileIncompatibilityMessage() {
+          unityShowBanner('This device does not support WebGL games. Please try on a desktop browser or a different mobile device.', 'error');
+          
+          // Hide loading bar and show a more detailed message
+          loadingBar.style.display = "none";
+          
+          var incompatibilityDiv = document.createElement('div');
+          incompatibilityDiv.style.cssText = 'background: #ff6b6b; color: white; padding: 20px; margin: 20px; border-radius: 8px; text-align: center; font-family: Arial, sans-serif;';
+          incompatibilityDiv.innerHTML = `
+            <h3>WebGL Not Supported</h3>
+            <p>Your device/browser does not support the WebGL technology required to run this game.</p>
+            <p><strong>Try:</strong></p>
+            <ul style="text-align: left; max-width: 300px; margin: 0 auto;">
+              <li>Using a desktop computer</li>
+              <li>Updating your browser</li>
+              <li>Trying a different browser (Chrome, Firefox, Safari)</li>
+              <li>Using a different device</li>
+            </ul>
+          `;
+          container.appendChild(incompatibilityDiv);
+        }
+
+        if (!testWebGLCompatibility()) {
+          showMobileIncompatibilityMessage();
+          return; // Don't load Unity
+        }
+
         unityShowBanner('WebGL builds are not supported on mobile devices.');
       } else {
         // Desktop style: Render the game canvas in a window that can be maximized to fullscreen:
