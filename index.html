@@ -56,11 +56,11 @@
       }
 
       var buildUrl = "Build";
-      var loaderUrl = buildUrl + "/Buildv_64-2021 Edit.loader.js";
+      var loaderUrl = buildUrl + "/Buildv_65-2021 Edit.loader.js";
       var config = {
-        dataUrl: buildUrl + "/Buildv_64-2021 Edit.data",
-        frameworkUrl: buildUrl + "/Buildv_64-2021 Edit.framework.js",
-        codeUrl: buildUrl + "/Buildv_64-2021 Edit.wasm",
+        dataUrl: buildUrl + "/Buildv_65-2021 Edit.data",
+        frameworkUrl: buildUrl + "/Buildv_65-2021 Edit.framework.js",
+        codeUrl: buildUrl + "/Buildv_65-2021 Edit.wasm",
         streamingAssetsUrl: "StreamingAssets",
         companyName: "Firestorm Inc",
         productName: "Pixel Golf",
@@ -107,36 +107,6 @@
       }
 
       loadingBar.style.display = "block";
-
-      // WebGL shader precision format polyfill for mobile browsers
-      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-        // Override WebGL context creation to add shader precision format fallbacks
-        const originalGetContext = HTMLCanvasElement.prototype.getContext;
-        HTMLCanvasElement.prototype.getContext = function(contextType, options) {
-          const context = originalGetContext.call(this, contextType, options);
-          
-          if (context && (contextType === 'webgl' || contextType === 'experimental-webgl')) {
-            const originalGetShaderPrecisionFormat = context.getShaderPrecisionFormat;
-            context.getShaderPrecisionFormat = function(shaderType, precisionType) {
-              const result = originalGetShaderPrecisionFormat.call(this, shaderType, precisionType);
-              
-              // If the result is null or invalid, provide safe fallback values
-              if (!result || result.rangeMin === undefined || result.rangeMax === undefined || result.precision === undefined) {
-                console.warn('getShaderPrecisionFormat returned null, using fallback values');
-                return {
-                  rangeMin: 127,
-                  rangeMax: 127,
-                  precision: 23
-                };
-              }
-              
-              return result;
-            };
-          }
-          
-          return context;
-        };
-      }
 
       var script = document.createElement("script");
       script.src = loaderUrl;
