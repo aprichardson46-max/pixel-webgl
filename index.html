@@ -126,6 +126,8 @@
         }
 
         function showMobileIncompatibilityMessage() {
+          window.shouldLoadUnity = false; // Prevent Unity loading
+          
           unityShowBanner('This device does not support WebGL games. Please try on a desktop browser or a different mobile device.', 'error');
           
           // Hide loading bar and show a more detailed message
@@ -149,10 +151,9 @@
 
         if (!testWebGLCompatibility()) {
           showMobileIncompatibilityMessage();
-          return; // Don't load Unity
+        } else {
+          unityShowBanner('WebGL builds are not supported on mobile devices.');
         }
-
-        unityShowBanner('WebGL builds are not supported on mobile devices.');
       } else {
         // Desktop style: Render the game canvas in a window that can be maximized to fullscreen:
 
@@ -329,21 +330,26 @@
         };
       }
 
-      var script = document.createElement("script");
-      script.src = loaderUrl;
-      script.onload = () => {
-        createUnityInstance(canvas, config, (progress) => {
-          progressBarFull.style.width = 100 * progress + "%";
-        }).then((unityInstance) => {
-          loadingBar.style.display = "none";
-          fullscreenButton.onclick = () => {
-            unityInstance.SetFullscreen(1);
-          };
-        }).catch((message) => {
-          alert(message);
-        });
-      };
-      document.body.appendChild(script);
+      // Only load Unity if not prevented by compatibility check
+      if (window.shouldLoadUnity !== false) {
+        loadingBar.style.display = "block";
+
+        var script = document.createElement("script");
+        script.src = loaderUrl;
+        script.onload = () => {
+          createUnityInstance(canvas, config, (progress) => {
+            progressBarFull.style.width = 100 * progress + "%";
+          }).then((unityInstance) => {
+            loadingBar.style.display = "none";
+            fullscreenButton.onclick = () => {
+              unityInstance.SetFullscreen(1);
+            };
+          }).catch((message) => {
+            alert(message);
+          });
+        };
+        document.body.appendChild(script);
+      }
     </script>
   </body>
 </html>
