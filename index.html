@@ -111,17 +111,31 @@
         container.className = "unity-mobile";
         canvas.className = "unity-mobile";
 
-        // To lower canvas resolution on mobile devices to gain some
-        // performance, uncomment the following line:
+        // More aggressive mobile compatibility
         config.devicePixelRatio = 1;
-        
-        // Additional mobile optimizations
         config.matchWebGLToCanvasSize = false;
         config.powerPreference = "default";
         
-        // Reduce memory pressure on mobile
+        // Force low precision shaders for mobile
+        config.webglContextAttributes = {
+          preserveDrawingBuffer: false,
+          premultipliedAlpha: false,
+          alpha: false,
+          antialias: false,
+          depth: true,
+          failIfMajorPerformanceCaveat: true,
+          powerPreference: "low-power",
+          stencil: false,
+          precision: "lowp"
+        };
+        
+        // Reduce memory even more aggressively
+        config.totalMemory = 33554432; // 32MB (even smaller)
+        config.initialMemorySize = 8388608; // 8MB initial
+        
+        // Reduce canvas size on mobile
         canvas.style.width = "100%";
-        canvas.style.height = "60vh"; // Smaller height for mobile
+        canvas.style.height = "50vh"; // Even smaller for mobile
 
       } else {
         // Desktop style: Render the game canvas in a window that can be maximized to fullscreen:
